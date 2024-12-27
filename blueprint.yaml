@@ -1,0 +1,73 @@
+blueprint:
+  name: TRV Calibrator
+  description: Calibrate your TRV using an external sensor
+  domain: automation
+  input:
+    trv:
+      name: Smart TRV
+      selector:
+        entity:
+          domain: climate
+    temperature_sensor:
+      name: Temperature Sensor
+      description: Sensor used to calibrate your TRV
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+    trv_calibration_number:
+      name: TRV Calibration Entity
+      description: If you can't find it, it's possible that your TRV doesn't support calibration.
+      selector:
+        entity:
+          domain: number
+          device_class: temperature
+    delay_in_minutes:
+      name: Delay in minutes
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 60
+          step: 1
+
+mode: restart
+
+variables:
+  trv: !input trv
+  trv_calibration_number: !input trv_calibration_number
+  temperature_sensor: !input temperature_sensor
+
+trigger:
+  - platform: state
+    entity_id: !input trv
+  - platform: state
+    entity_id: !input trv_calibration_number
+  - platform: state
+    entity_id: !input temperature_sensor
+
+condition:
+  - condition: template
+    value_template: '{{ state_attr(trv, "current_temperature") != None }}'
+  - condition: template
+    value_template: '{{ states(trv_calibration_number) != "unavailable" and states(trv_calibration_number) != "unknown" }}'
+  - condition: template
+    value_template: '{{ states(temperature_sensor) != "unavailable" and states(temperature_sensor) != "unknown" }}'
+
+action:
+  - delay:
+      minutes: !input delay_in_minutes
+  - service: number.set_value
+    target:
+      entity_id: !input trv_calibration_number
+    data:
+      value: >-
+        {% set room_temperature = states(temperature_sensor) | float(0) %}
+        {% set trv_temperature = state_attr(trv, "current_temperature") | float(0) %}
+        {% set trv_calibration = states(trv_calibration_number) | float(0) %}
+        {% set trv_calibration_min = state_attr(trv_calibration_number, "min") | float(-5) %}
+        {% set trv_calibration_max = state_attr(trv_calibration_number, "max") | float(5) %}
+        {% set new_trv_calibration = room_temperature - trv_temperature + trv_calibration %}
+        {% set bounded_calibration = [ [ new_trv_calibration, trv_calibration_min ] | max, trv_calibration_max ] | min %}
+
+        {{ bounded_calibration }}
