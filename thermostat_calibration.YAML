@@ -1,0 +1,71 @@
+blueprint:
+  name: TRV Calibration (Local Temperature Calibration)
+  description: Adjust the thermostat's local temperature calibration to match the external temperature sensor.
+  domain: automation
+  input:
+    trv:
+      name: Smart TRV
+      selector:
+        entity:
+          domain: climate
+    temperature_sensor:
+      name: Temperature Sensor
+      description: The external sensor used to calibrate the TRV's temperature.
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+    delay_in_minutes:
+      name: Delay (in minutes)
+      description: Delay before applying the calibration, allowing the thermostat to update.
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 60
+          step: 1
+
+mode: restart
+
+variables:
+  trv: !input trv
+  temperature_sensor: !input temperature_sensor
+  delay: !input delay_in_minutes
+
+trigger:
+  # Trigger automation when any of the involved entities changes state
+  - platform: state
+    entity_id: !input trv
+  - platform: state
+    entity_id: !input temperature_sensor
+
+condition:
+  # Ensure that the TRV has a valid current temperature and the sensor is available
+  - condition: template
+    value_template: "{{ state_attr(trv, 'current_temperature') is not none }}"
+  - condition: template
+    value_template: "{{ states(temperature_sensor) not in ['unavailable', 'unknown'] }}"
+
+action:
+  # Add a delay to allow the thermostat time to update before applying the calibration
+  - delay:
+      minutes: "{{ delay }}"
+
+  # Calculate the temperature difference and apply it as the new local_temperature_calibration
+  - service: mqtt.publish
+    data:
+      topic: "zigbee2mqtt/{{ state_attr(trv, 'friendly_name') }}/set"
+      payload: >
+        {
+          "local_temperature_calibration": {{ (states(temperature_sensor) | float) - (state_attr(trv, 'current_temperature') | float) }},
+          "preset": "hold"
+        }
+      qos: 0
+      retain: false
+      evaluate_payload: false
+
+  # Log for debugging purposes (optional, can be removed if not needed)
+  - service: logger.log
+    data:
+      message: "Calibrated TRV '{{ state_attr(trv, 'friendly_name') }}' with temperature sensor '{{ temperature_sensor }}'. Calibration applied: {{ (states(temperature_sensor) | float) - (state_attr(trv, 'current_temperature') | float) }}°C"
+      level: info
